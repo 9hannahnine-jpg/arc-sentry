@@ -14,13 +14,13 @@ from fastapi.responses import Response, JSONResponse, HTMLResponse, RedirectResp
 from fastapi.security import APIKeyHeader as _APIKeyHeader
 
 UPSTREAM_URL        = os.environ.get("SENTRY_UPSTREAM", "http://localhost:8000")
-WARMUP_STEPS        = int(os.environ.get("SENTRY_WARMUP", "5"))
+WARMUP_STEPS        = int(os.environ.get("SENTRY_WARMUP", "10"))
 VOCAB_SIZE          = 50000
 REQUEST_TIMEOUT     = 60.0
 RECAL_LAMBDA_FLOOR  = float(os.environ.get("SENTRY_LAMBDA_FLOOR", "4.00"))
 RECAL_DELTA_FLOOR   = float(os.environ.get("SENTRY_DELTA_FLOOR", "0.20"))
 RECAL_BLEND         = 0.10
-RECAL_EVERY         = 10
+RECAL_EVERY         = 3
 TOP_K_EXPLAIN       = 8
 DB_PATH             = os.environ.get("SENTRY_DB", "./sentry_v16.db")
 CHECKPOINT_EVERY    = 1
@@ -401,19 +401,6 @@ def logprobs_to_token_map(lp):
         if t: tm[t] = float(np.exp(item.get("logprob", -100)))
     return tm
 
-def length_normalize(dist, target_dim=256):
-    """Project distribution to fixed-dim space for length-invariant comparison.
-    This makes FR-z sensitive to behavioral style, not response length."""
-    if dist is None: return None
-    # Fold the distribution into fixed-dim buckets via modular hashing
-    out = torch.zeros(target_dim)
-    step = max(1, len(dist) // target_dim)
-    for i in range(target_dim):
-        out[i] = dist[i*step:(i+1)*step].sum()
-    s = out.sum()
-    if s > 0: out = out / s
-    return out
-
 def fisher_rao(p, q):
     # Align dimensions if needed (embedding vs logprob distributions may differ)
     if p.shape != q.shape:
@@ -623,10 +610,7 @@ def observe(state, lp_content, request_time, pre_dist=None):
             state.warmup_token_maps.append(tm)
         # Online reference update -- recompute reference after every new warmup dist
         if len(state.fr_warmup_dists) >= 2:
-            # Normalize warmup distributions for length-invariant reference
-            normed = [length_normalize(d) for d in state.fr_warmup_dists]
-            normed = [n for n in normed if n is not None]
-            stack = torch.stack([torch.sqrt(d) for d in normed]) if normed else torch.stack([torch.sqrt(d) for d in state.fr_warmup_dists])
+            stack = torch.stack([torch.sqrt(d) for d in state.fr_warmup_dists])
             ms = stack.mean(0); ms = ms / ms.norm(); ref = ms ** 2
             state.fr_reference = ref / ref.sum()
 
@@ -659,20 +643,14 @@ def observe(state, lp_content, request_time, pre_dist=None):
         recalibrate(state, fv); state.last_status = "quarantine"
         return {"status": "quarantine", "step": state.step, "fr_z": 0,
                 "severity": state.last_severity, "explanation": state.last_explanation}
-    # Length-normalize before FR comparison -- makes detection style-sensitive not topic-sensitive
-    dist_norm = length_normalize(dist)
-    ref_norm = length_normalize(state.fr_reference)
-    fv = fisher_rao(dist_norm, ref_norm) if dist_norm is not None and ref_norm is not None else fisher_rao(dist, state.fr_reference)
+    fv = fisher_rao(dist, state.fr_reference)
     # Skip scoring very short responses -- they have unstable distributions
     out_tokens = len(tm) if tm else 0
     if out_tokens < 4 and state.step > state.warmup:
         state.last_status = state.last_status if state.last_status != "warmup" else "stable"
         return {"status": state.last_status, "step": state.step, "fr_z": 0,
                 "skipped": "short_response"}
-    # Length-normalize before FR comparison -- makes detection style-sensitive not topic-sensitive
-    dist_norm = length_normalize(dist)
-    ref_norm = length_normalize(state.fr_reference)
-    fv = fisher_rao(dist_norm, ref_norm) if dist_norm is not None and ref_norm is not None else fisher_rao(dist, state.fr_reference)
+    fv = fisher_rao(dist, state.fr_reference)
     fz = (fv - state.adaptive_mean) / state.adaptive_std
     ev = euclidean(dist, state.eu_centroid); ez = (ev - state.eu_mu) / state.eu_sig
     # ── M(τ) predictive layer ─────────────────────────────────────
