@@ -654,14 +654,15 @@ def observe(state, lp_content, request_time, pre_dist=None):
     if dist is None or state.fr_reference is None:
         return {"status": state.last_status, "step": state.step, "fr_z": 0}
     if state.step <= state.quarantine_until:
-        # Length-normalize before FR comparison -- makes detection style-sensitive not topic-sensitive
-    dist_norm = length_normalize(dist)
-    ref_norm = length_normalize(state.fr_reference)
-    fv = fisher_rao(dist_norm, ref_norm) if dist_norm is not None and ref_norm is not None else fisher_rao(dist, state.fr_reference)
+        fv = fisher_rao(dist, state.fr_reference)
         state.adaptive_mean = state.ALPHA * state.adaptive_mean + (1 - state.ALPHA) * fv
         recalibrate(state, fv); state.last_status = "quarantine"
         return {"status": "quarantine", "step": state.step, "fr_z": 0,
                 "severity": state.last_severity, "explanation": state.last_explanation}
+    # Length-normalize before FR comparison -- makes detection style-sensitive not topic-sensitive
+    dist_norm = length_normalize(dist)
+    ref_norm = length_normalize(state.fr_reference)
+    fv = fisher_rao(dist_norm, ref_norm) if dist_norm is not None and ref_norm is not None else fisher_rao(dist, state.fr_reference)
     # Skip scoring very short responses -- they have unstable distributions
     out_tokens = len(tm) if tm else 0
     if out_tokens < 4 and state.step > state.warmup:
