@@ -14,7 +14,7 @@ from fastapi.responses import Response, JSONResponse, HTMLResponse, RedirectResp
 from fastapi.security import APIKeyHeader as _APIKeyHeader
 
 UPSTREAM_URL        = os.environ.get("SENTRY_UPSTREAM", "http://localhost:8000")
-WARMUP_STEPS        = int(os.environ.get("SENTRY_WARMUP", "20"))
+WARMUP_STEPS        = int(os.environ.get("SENTRY_WARMUP", "5"))
 VOCAB_SIZE          = 50000
 REQUEST_TIMEOUT     = 60.0
 RECAL_LAMBDA_FLOOR  = float(os.environ.get("SENTRY_LAMBDA_FLOOR", "2.50"))
@@ -608,23 +608,30 @@ def observe(state, lp_content, request_time, pre_dist=None):
         if dist is not None:
             state.fr_warmup_dists.append(dist); state.eu_warmup_dists.append(dist)
             state.warmup_token_maps.append(tm)
-        if state.step == state.warmup and state.fr_warmup_dists:
+        # Online reference update -- recompute reference after every new warmup dist
+        if len(state.fr_warmup_dists) >= 2:
             stack = torch.stack([torch.sqrt(d) for d in state.fr_warmup_dists])
             ms = stack.mean(0); ms = ms / ms.norm(); ref = ms ** 2
             state.fr_reference = ref / ref.sum()
+
+        if state.step == state.warmup and state.fr_warmup_dists:
+            # Warmup complete -- compute baseline stats
             state.fr_baseline  = [fisher_rao(d, state.fr_reference) for d in state.fr_warmup_dists]
             std = float(np.std(state.fr_baseline)) + 1e-8
-            state.cusum_delta  = max(0.5 * std, RECAL_DELTA_FLOOR)
+            # Wider initial thresholds when fewer samples -- scale by sqrt(20/n) uncertainty factor
+            n = len(state.fr_warmup_dists)
+            uncertainty = float(np.sqrt(20.0 / n))
+            state.cusum_delta  = max(0.5 * std * uncertainty, RECAL_DELTA_FLOOR)
             warmup_zs = [(fr - float(np.mean(state.fr_baseline))) / std for fr in state.fr_baseline]
-            state.cusum_lambda = max(5.0 * std, max(warmup_zs) * 3.0, RECAL_LAMBDA_FLOOR)
-            state.adaptive_mean = float(np.mean(state.fr_baseline)); state.adaptive_std = std
+            state.cusum_lambda = max(5.0 * std * uncertainty, max(warmup_zs) * 3.0, RECAL_LAMBDA_FLOOR)
+            state.adaptive_mean = float(np.mean(state.fr_baseline)); state.adaptive_std = std * uncertainty
             stack2 = torch.stack(state.eu_warmup_dists); state.eu_centroid = stack2.mean(0)
             eu_ds = [euclidean(d, state.eu_centroid) for d in state.eu_warmup_dists]
             state.eu_mu = float(np.mean(eu_ds)); state.eu_sig = float(np.std(eu_ds)) + 1e-8
             state.noise_floor = NOISE_FLOOR; state.last_status = "stable"
             _we = [token_entropy([{"token": t, "logprob": float(np.log(p + 1e-10))} for t, p in tm.items()]) for tm in state.warmup_token_maps]
             state.warmup_entropy = float(np.mean(_we)) if _we else 0.0
-            print("[SENTRY] Warmup complete: " + state.deployment_id + " v=" + state.model_version + " λ=" + str(round(state.cusum_lambda, 4)))
+            print("[SENTRY] Warmup complete (n=" + str(n) + " uncertainty=" + str(round(uncertainty,2)) + "): " + state.deployment_id + " v=" + state.model_version + " λ=" + str(round(state.cusum_lambda, 4)))
             save_version_snapshot(state.deployment_id, state.model_version, state)
             state.snapshot_saved = True
         return {"status": "warmup", "step": state.step, "fr_z": 0}
