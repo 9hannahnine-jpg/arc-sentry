@@ -621,10 +621,21 @@ def observe(state, lp_content, request_time, pre_dist=None):
             # Wider initial thresholds when fewer samples -- scale by sqrt(20/n) uncertainty factor
             n = len(state.fr_warmup_dists)
             uncertainty = 1.0  # no uncertainty scaling -- RECAL handles adaptation
-            state.cusum_delta  = max(0.5 * std * uncertainty, RECAL_DELTA_FLOOR)
+            state.cusum_delta  = max(0.5 * std, RECAL_DELTA_FLOOR)
             warmup_zs = [(fr - float(np.mean(state.fr_baseline))) / std for fr in state.fr_baseline]
-            state.cusum_lambda = max(5.0 * std * uncertainty, max(warmup_zs) * 3.0, RECAL_LAMBDA_FLOOR)
-            state.adaptive_mean = float(np.mean(state.fr_baseline)); state.adaptive_std = std * uncertainty
+            # Simulate CUSUM on warmup to find natural peak -- set lambda 3x above that
+            sim_cusum = 0.0
+            sim_mean = 0.0
+            sim_peak = 0.0
+            for wz in warmup_zs:
+                sim_mean = 0.9999 * sim_mean + 0.0001 * wz
+                sim_cusum = max(0.0, sim_cusum + (wz - sim_mean - max(0.5*std, RECAL_DELTA_FLOOR)))
+                if sim_cusum > sim_peak:
+                    sim_peak = sim_cusum
+            # Lambda = 3x the peak CUSUM seen on stable warmup traffic, floored at RECAL_LAMBDA_FLOOR
+            natural_lambda = max(sim_peak * 3.0, 5.0 * std, RECAL_LAMBDA_FLOOR)
+            state.cusum_lambda = natural_lambda
+            state.adaptive_mean = float(np.mean(state.fr_baseline)); state.adaptive_std = std
             stack2 = torch.stack(state.eu_warmup_dists); state.eu_centroid = stack2.mean(0)
             eu_ds = [euclidean(d, state.eu_centroid) for d in state.eu_warmup_dists]
             state.eu_mu = float(np.mean(eu_ds)); state.eu_sig = float(np.std(eu_ds)) + 1e-8
