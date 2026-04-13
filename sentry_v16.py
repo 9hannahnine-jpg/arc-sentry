@@ -691,7 +691,7 @@ def observe(state, lp_content, request_time, pre_dist=None):
     NORMAL_THRESHOLD  = 2.0   # below this: update baseline, status stable
     ELEVATED_THRESHOLD = 2.0  # above this: don't update baseline, status elevated
     DRIFT_THRESHOLD   = 3.0   # anomaly window mean above this: DRIFT
-    BASELINE_LR       = 0.05  # learning rate for baseline update on normal requests
+    BASELINE_LR       = 0.15  # learning rate for baseline update on normal requests
 
     # Anomaly window: last 10 fz scores that exceeded normal threshold
     state.window_frzs.append(fz)
