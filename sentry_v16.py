@@ -711,7 +711,7 @@ def observe(state, lp_content, request_time, pre_dist=None):
         if state.rec_steps >= 3:
             state.cusum_fired = False; state.cusum_value = 0.0; state.cusum_mean = 0.0
             state.steps_in_drift = 0; state.drift_classified = False; state.rec_steps = 0
-            state.current_severity = None; state.quarantine_until = state.step + 10
+            state.current_severity = None; state.quarantine_until = state.step + 2
             state.adaptive_mean = state.ALPHA * state.adaptive_mean + (1 - state.ALPHA) * fv
             state.last_status = "RECOVERED"
     else:
