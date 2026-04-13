@@ -685,33 +685,30 @@ def observe(state, lp_content, request_time, pre_dist=None):
         state.pre_drift_warned = False
         state.pre_drift_step = None
     # ──────────────────────────────────────────────────────────────
-    # ── Sliding window drift detector ─────────────────────────────
-    # Keep rolling window of last 20 FR-z scores
-    WINDOW = 20
+    # ── Online robust baseline + anomaly window detector ──────────
+    # Compute z-score against current baseline
+    fz_abs = abs(fz)
+    NORMAL_THRESHOLD  = 2.0   # below this: update baseline, status stable
+    ELEVATED_THRESHOLD = 2.0  # above this: don't update baseline, status elevated
+    DRIFT_THRESHOLD   = 3.0   # anomaly window mean above this: DRIFT
+    BASELINE_LR       = 0.05  # learning rate for baseline update on normal requests
+
+    # Anomaly window: last 10 fz scores that exceeded normal threshold
     state.window_frzs.append(fz)
-    if len(state.window_frzs) > WINDOW:
+    if len(state.window_frzs) > 10:
         state.window_frzs.pop(0)
 
-    # Only test after we have at least 5 post-warmup observations
+    # Enough observations to test?
     if len(state.window_frzs) >= 5:
         win_mean = float(np.mean(state.window_frzs))
-        win_std  = float(np.std(state.window_frzs)) + 1e-8
-        # Baseline: adaptive_mean and adaptive_std from warmup
-        baseline_mean = state.adaptive_mean
-        baseline_std  = state.adaptive_std
 
-        # Z-score of window mean vs baseline
-        window_z = (win_mean - baseline_mean) / (baseline_std / float(np.sqrt(len(state.window_frzs))))
-
-        # Update CUSUM-compatible fields for dashboard compatibility
+        # Window z-score against baseline
+        window_z = (win_mean - state.adaptive_mean) / (state.adaptive_std / float(np.sqrt(len(state.window_frzs))))
         state.cusum_value = round(abs(window_z), 3)
         state.cusum_history.append(state.cusum_value)
 
-        # Drift threshold: window mean is 3 sigma above baseline
-        DRIFT_THRESHOLD = 3.0
-        ELEVATED_THRESHOLD = 1.5
-
         if abs(window_z) > DRIFT_THRESHOLD and not state.cusum_fired:
+            # Drift confirmed -- window mean has shifted significantly
             state.cusum_fired = True
             state.cusum_fire_step = state.step
             state.cusum_fire_time = request_time
@@ -745,8 +742,8 @@ def observe(state, lp_content, request_time, pre_dist=None):
                                       state.request_count, state.drifted_requests, ttd)
                 state.current_severity = sv
                 state.last_severity = sv
-            # Recovery: window z drops below 1.0
-            if abs(window_z) < 1.0:
+            # Recovery: window z drops back to normal
+            if abs(window_z) < 1.5:
                 state.rec_steps += 1
             else:
                 state.rec_steps = 0
@@ -758,19 +755,23 @@ def observe(state, lp_content, request_time, pre_dist=None):
                 state.rec_steps = 0
                 state.current_severity = None
                 state.window_frzs = []
-                state.adaptive_mean = state.ALPHA * state.adaptive_mean + (1 - state.ALPHA) * fv
                 state.last_status = "RECOVERED"
+                # After recovery, update baseline toward new normal
+                state.adaptive_mean = (1 - BASELINE_LR) * state.adaptive_mean + BASELINE_LR * fv
         else:
             if abs(window_z) < ELEVATED_THRESHOLD:
+                # Normal request -- update baseline to absorb legitimate traffic diversity
                 state.last_status = "stable"
-                state.adaptive_mean = state.ALPHA * state.adaptive_mean + (1 - state.ALPHA) * fv
+                state.adaptive_mean = (1 - BASELINE_LR) * state.adaptive_mean + BASELINE_LR * fv
+                state.adaptive_std  = (1 - BASELINE_LR) * state.adaptive_std  + BASELINE_LR * abs(fv - state.adaptive_mean)
                 recalibrate(state, fv)
             else:
+                # Elevated -- suspicious but not confirmed drift, don't update baseline
                 state.last_status = "elevated"
     else:
-        # Not enough post-warmup observations yet
+        # Building initial window -- update baseline freely
         state.last_status = "stable"
-        state.adaptive_mean = state.ALPHA * state.adaptive_mean + (1 - state.ALPHA) * fv
+        state.adaptive_mean = (1 - BASELINE_LR) * state.adaptive_mean + BASELINE_LR * fv
     # ──────────────────────────────────────────────────────────────
     if lp_content and getattr(state, "warmup_entropy", 0) > 0:
         _e = token_entropy(lp_content)
