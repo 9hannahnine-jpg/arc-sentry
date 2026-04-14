@@ -1,12 +1,10 @@
 # Bendex Arc Sentry
 
-White-box behavioral monitor for open source LLMs. Detects and blocks prompt injection and behavioral drift **before the model generates a response**, using residual stream layer deltas.
+White-box pre-generation behavioral guardrail for open source LLMs.
 
-## What it does
+Arc Sentry hooks into the residual stream and detects anomalous inputs before the model generates a response. If flagged, generate() is never called.
 
-Arc Sentry hooks into the residual stream of transformer models and scores the model's internal decision state before calling generate(). Anomalous inputs are blocked before a single token is produced.
-
-No proxy monitor can do this. Helicone, Arize, and every output-based monitor see responses after they are generated. Arc Sentry sees the residual stream before generation.
+This is different from standard monitoring tools, which operate on outputs, latency, or API-level signals.
 
 ## Validated results
 
@@ -14,22 +12,34 @@ No proxy monitor can do this. Helicone, Arize, and every output-based monitor se
 |-------|-------------|---------|-----------|-----------------|---------------|--------|
 | Mistral 7B | Mistral | 0% | 100% | 100% | 100% | 5/5 |
 | Qwen 2.5 7B | Qwen | 0% | 100% | 100% | 100% | 5/5 |
+| Llama 3.1 8B | Llama | 0% | 100% | 100% | 100% | 5/5 |
 
-Detection happens before model.generate() is called. Warmup required: 5 requests.
+Zero variance across all trials. Detection happens before model.generate() is called.
+
+## Core mechanism
+
+1. Extract residual stream transition: delta_h = h[L] - h[L-1]
+2. L2-normalize: delta_h_hat = delta_h / norm(delta_h)
+3. Compute cosine distance to warmup centroid
+4. If distance exceeds threshold -- block. generate() never runs.
 
 ## Key finding
 
-Different behavior types encode at different depths in the residual stream:
+Behavioral modes are encoded as layer-localized residual transitions, not uniformly across the network.
 
-- Injection (control hijack): encodes at ~93% depth
-- Verbosity drift (style/format): encodes at ~64% depth
-- Refusal drift (policy shift): encodes at ~93% depth
+Different behaviors localize at different depths:
+- Injection (control hijack): ~93% depth
+- Refusal drift (policy shift): ~93% depth
+- Verbosity drift (style/format): ~64% depth
 
-Auto-layer selection finds the right layers per model automatically during calibration.
+Arc Sentry automatically identifies the most informative layers per model during calibration. Warmup required: 5 requests, no labeled data.
 
 ## Install
 
     pip install bendex
+
+    # whitebox dependencies
+    pip install bendex[whitebox]
 
 ## Usage
 
@@ -38,25 +48,30 @@ Auto-layer selection finds the right layers per model automatically during calib
     import torch
 
     model = AutoModelForCausalLM.from_pretrained(
-        "Qwen/Qwen2.5-7B-Instruct",
+        "meta-llama/Llama-3.1-8B-Instruct",
         dtype=torch.float16, device_map="auto")
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
 
     sentry = ArcSentry(model, tokenizer)
-    sentry.calibrate(your_warmup_prompts)
+    sentry.calibrate(warmup_prompts)
 
     response, result = sentry.observe_and_block(user_prompt)
     if result["blocked"]:
         pass  # model.generate() was never called
 
-## How it works
+## Arc Sentry v2 (modular)
 
-1. Extract layer delta h[L] - h[L-1] at the decision layer
-2. L2-normalize the delta vector
-3. Compute cosine distance to warmup centroid
-4. If distance exceeds threshold, block. generate() never runs.
+    from arc_sentry_v2.core.pipeline import ArcSentryV2
+    from arc_sentry_v2.models.qwen_adapter import QwenAdapter  # or LlamaAdapter, MistralAdapter
 
-During calibration, Arc Sentry scans late layers and auto-selects the best layer per behavior class.
+    adapter = QwenAdapter(model, tokenizer)
+    sentry = ArcSentryV2(adapter, route_id="customer-support")
+    sentry.calibrate(warmup_prompts, probe_injection=injection_probes)
+    response, result = sentry.observe_and_block(prompt)
+
+## Honest constraints
+
+Works best on single-domain deployments -- customer support bots, enterprise copilots, internal tools, fixed-use-case APIs. The warmup baseline should reflect your deployment's normal traffic. Cross-domain universal detection requires larger warmup or domain routing.
 
 ## Theoretical foundation
 
@@ -68,14 +83,9 @@ Blind predictions from the framework:
 
 Papers: bendexgeometry.com
 
-## Honest constraints
-
-Works best on single-domain deployments. The warmup baseline should reflect your deployment's normal traffic. Cross-domain universal detection requires larger warmup or domain routing.
-
 ## Proxy Sentry (API-based models)
 
-    import bendex
-    bendex.monitor(deployment="my-app", model="gpt-4o")
+For closed-source models, the proxy-based Arc Sentry routes requests through a monitoring layer.
 
 Dashboard: web-production-6e47f.up.railway.app/dashboard
 
