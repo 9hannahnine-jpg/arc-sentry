@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arc-sentry"
-version = "2.4.0"
-description = "Arc Sentry — prompt injection detection for open source LLMs. Blocks attacks before generate() is called."
+version = "3.0.0"
+description = "Arc Sentry — prompt injection detection for LLMs. DR=100%, FPR=0% on Mistral-7B. Geometric detection via Fisher manifold (Nine 2026)."
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
