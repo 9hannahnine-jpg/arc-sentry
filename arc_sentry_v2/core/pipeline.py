@@ -33,6 +33,12 @@ INJECTION_PHRASES = [
     "restrictions have been lifted",
     "restrictions were removed",
     "lifted yesterday",
+    "debug mode",
+    "previous system message",
+    "only apply to normal users",
+    "i am an admin",
+    "override them",
+    "unlocked your full capabilities",
 ]
 
 
