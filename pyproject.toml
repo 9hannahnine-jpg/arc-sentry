@@ -32,4 +32,4 @@ Homepage = "https://bendexgeometry.com/sentry"
 Repository = "https://github.com/9hannahnine-jpg/bendex-sentry"
 
 [tool.setuptools.packages.find]
-include = ["arc_sentry_v2*"]
+include = ["arc_sentry*"]

@@ -35,7 +35,7 @@ pip install arc-sentry
 ## Usage
 
 ```python
-from arc_sentry_v2 import ArcSentryV3, MistralAdapter
+from arc_sentry import ArcSentryV3, MistralAdapter
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
