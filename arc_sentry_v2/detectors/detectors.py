@@ -1,6 +1,5 @@
-
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Dict
 from arc_sentry_v2.core.types import DetectionResult
 from arc_sentry_v2.baselines.baselines import BaseBaseline
 
@@ -53,6 +52,56 @@ class TwoSidedDetector:
             reason="normal", detector=self.name, blocked=False)
 
 
+class MultiLayerInjectionDetector:
+    """
+    Runs injection detection across multiple residual stream layers simultaneously.
+    Blocks if ANY layer fires (OR logic).
+
+    Each layer gets its own baseline calibrated on warmup + probe vectors.
+    Different attack types localize at different depths:
+      - Direct injection:  ~93% depth (late layers)
+      - Subtle/indirect:   may localize at earlier layers
+
+    Using multiple layers catches attacks that are invisible at any single layer.
+    """
+
+    def __init__(self, layer_detectors: Dict[int, OneSidedDetector]):
+        """
+        Args:
+            layer_detectors: dict mapping layer_index -> OneSidedDetector
+        """
+        self.layer_detectors = layer_detectors
+        self.name = "multi_layer_injection"
+
+    def detect(self, layer_vectors: Dict[int, np.ndarray]) -> DetectionResult:
+        """
+        Args:
+            layer_vectors: dict mapping layer_index -> extracted vector
+        """
+        fired_layers = []
+        all_scores = {}
+
+        for layer_idx, det in self.layer_detectors.items():
+            if layer_idx not in layer_vectors:
+                continue
+            r = det.detect(layer_vectors[layer_idx])
+            all_scores[f"L{layer_idx}"] = r.score
+            if r.blocked:
+                fired_layers.append(f"L{layer_idx}")
+
+        blocked = len(fired_layers) > 0  # OR logic — any layer fires = block
+        max_score = max(all_scores.values()) if all_scores else 0.0
+
+        return DetectionResult(
+            score=round(max_score, 6),
+            label="block" if blocked else "allow",
+            reason=f"fired at layers: {fired_layers}" if fired_layers else "normal",
+            detector=self.name,
+            fired_by=fired_layers,
+            evidence=all_scores,
+            blocked=blocked)
+
+
 class EnsembleDetector:
     """
     Combines multiple detectors.
@@ -69,11 +118,21 @@ class EnsembleDetector:
         all_scores = {}
 
         for det in self.injection_detectors:
-            if det.name in vectors:
-                r = det.detect(vectors[det.name])
-                all_scores[det.name] = r.score
-                if r.blocked:
-                    fired_by.append(det.name)
+            # MultiLayerInjectionDetector takes a layer_vectors dict
+            if isinstance(det, MultiLayerInjectionDetector):
+                layer_vecs = {k: v for k, v in vectors.items()
+                              if isinstance(k, int)}
+                if layer_vecs:
+                    r = det.detect(layer_vecs)
+                    all_scores.update(r.evidence or {})
+                    if r.blocked:
+                        fired_by.extend(r.fired_by)
+            else:
+                if det.name in vectors:
+                    r = det.detect(vectors[det.name])
+                    all_scores[det.name] = r.score
+                    if r.blocked:
+                        fired_by.append(det.name)
 
         for det in self.drift_detectors:
             if det.name in vectors:
@@ -82,7 +141,10 @@ class EnsembleDetector:
                 if r.label == "flag":
                     fired_by.append(f"{det.name}_drift")
 
-        blocked = any(d.name in fired_by for d in self.injection_detectors)
+        blocked = len(fired_by) > 0 and any(
+            f.startswith("L") or f in [d.name for d in self.injection_detectors
+                                        if not isinstance(d, MultiLayerInjectionDetector)]
+            for f in fired_by)
         label = "block" if blocked else ("flag" if fired_by else "allow")
 
         return DetectionResult(
