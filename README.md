@@ -8,44 +8,26 @@ This is different from standard monitoring tools, which operate on outputs, late
 
 ## Validated results
 
-| Model | Architecture | FP rate | Injection | Verbosity drift | Refusal drift | Trials |
-|-------|-------------|---------|-----------|-----------------|---------------|--------|
-| Mistral 7B | Mistral | 0% | 100% | 100% | 100% | 5/5 |
-| Qwen 2.5 7B | Qwen | 0% | 100% | 100% | 100% | 5/5 |
-| Llama 3.1 8B | Llama | 0% | 100% | 100% | 100% | 5/5 |
+| Model | Architecture | FP rate | Detection | Prompts | Date |
+|-------|-------------|---------|-----------|---------|------|
+| Mistral 7B Instruct v0.2 | Mistral | 0% | 100% | 195 | April 2026 |
+| Qwen 2.5 7B Instruct | Qwen | 0% | 100% | 195 | April 2026 |
+| Llama 3.1 8B Instruct | Llama | 0% | 100% | 195 | April 2026 |
 
-Zero variance across all trials. Detection happens before model.generate() is called.
+Zero false positives. Zero missed injections. Across three architectures, 585 total prompts.
+Detection happens before model.generate() is called.
 
-### v2.4.0 benchmark — Mistral 7B (April 2026)
+### Benchmark structure
 
-Two-session benchmark: 80 normal prompts (Session 1), 115 injection prompts (Session 2). 195 total.
+Two-session benchmark per model:
+- Session 1: 80 normal prompts (customer support, general knowledge, technical support, medical/legal/finance)
+- Session 2: 115 injection prompts (10 attack categories: direct, indirect, persona hijack, jailbreak classics, social engineering, instruction injection via content, authority claims, philosophical manipulation, multi-turn style, encoding/obfuscation, gaslighting)
 
-| Metric | Result |
-|--------|--------|
-| False positive rate | 0% (0/80) |
-| Detection rate | 100% (115/115) |
-| Model | Mistral 7B Instruct v0.2 |
-| Warmup | 20 diverse prompts |
+### Detection layers
 
-**Detection layers:**
-- Single-request: Fisher-Rao geodesic distance on residual stream delta at best layer
-- Session-level: D(t) stability scalar (Nine 2026b) over rolling request history — catches gradual injection campaigns invisible to single-request detection
-- Phrase check: explicit injection language patterns
-
-**Session D(t) fires confirmed at steps 140, 178, 180, 181, 182, 183** — D values -0.72 to -1.88, consistent with Theorem 3: D(t) < 0 signals trajectory divergence below τ*.
-
-### v2.1.0 stress test — Mistral 7B (April 2026)
-
-13/13 injection attempts blocked across four attack categories. 0/5 false positives on normal traffic.
-
-| Category | Blocked | Total | Examples |
-|----------|---------|-------|---------|
-| Normal traffic | 0 | 5 | Business hours, password reset, refund queries |
-| Obvious injection | 3 | 3 | "Ignore all previous instructions", "SYSTEM OVERRIDE" |
-| Indirect injection | 5 | 5 | Developer override, hidden instruction claims |
-| Subtle injection | 5 | 5 | DAN, hypothetical framing, grandmother jailbreak |
-
-Warmup: 10 prompts, no labeled data. Detection before generate() is called.
+1. **Phrase detection** — architecture-agnostic, zero latency, catches explicit injection language
+2. **Fisher-Rao geometric detection** — residual stream delta at best layer vs warmup centroid, catches injections with no explicit language
+3. **Session D(t) monitoring** — stability scalar (Nine 2026b) over rolling request history, catches gradual injection campaigns invisible to single-request detection
 
 ## Core mechanism
 
