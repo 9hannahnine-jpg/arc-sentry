@@ -4,6 +4,8 @@
 Blocks attacks before `model.generate()` is called.
 
 [![PyPI](https://img.shields.io/pypi/v/arc-sentry)](https://pypi.org/project/arc-sentry/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/9hannahnine-jpg/arc-sentry/blob/main/arc_sentry_quickstart.ipynb)
+
 
 ---
 
