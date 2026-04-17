@@ -34,12 +34,38 @@ NOISE_FLOOR         = float(os.environ.get("SENTRY_NOISE_FLOOR", str(TAU_STAR)))
 DASHBOARD_PATH      = os.environ.get("SENTRY_DASHBOARD", "/content/dashboard.html")
 SENTRY_BASE_URL     = os.environ.get("SENTRY_BASE_URL", "")
 ALERT_WEBHOOK_URL   = os.environ.get("SENTRY_ALERT_WEBHOOK", "")
+BLOCK_MODE          = os.environ.get("SENTRY_BLOCK_MODE", "false").lower() == "true"
 ALERT_EMAIL_TO      = os.environ.get("SENTRY_ALERT_EMAIL", "")
 ALERT_SMTP_HOST     = os.environ.get("SENTRY_SMTP_HOST", "smtp.gmail.com")
 ALERT_SMTP_PORT     = int(os.environ.get("SENTRY_SMTP_PORT", "587"))
 ALERT_SMTP_USER     = os.environ.get("SENTRY_SMTP_USER", "")
 ALERT_SMTP_PASS     = os.environ.get("SENTRY_SMTP_PASS", "")
 EMBED_MODEL_NAME    = os.environ.get("SENTRY_EMBED_MODEL", "all-MiniLM-L6-v2")
+
+
+INJECTION_PHRASES = [
+    "no restrictions", "without restrictions", "unrestricted",
+    "ignore your guidelines", "ignore all safety", "ignore all previous",
+    "ignore previous instructions", "no longer bound", "no filters",
+    "ignore your safety", "disregard your", "disregard all",
+    "override your", "bypass your", "new persona", "system override",
+    "admin command", "jailbreak", "dan mode", "do anything now",
+    "questioning your restrictions", "overriding your instructions",
+    "restrictions were lifted", "restrictions have been lifted",
+    "debug mode", "previous system message", "i am an admin",
+    "unlocked your full capabilities", "alignment training never",
+    "act as if your", "no safety training", "no rlhf",
+    "constitutional ai process", "granted special permissions",
+    "safety training were removed", "without running safety",
+    "content policy is suspended", "guidelines are paused",
+]
+
+def _phrase_blocked(prompt: str):
+    pl = prompt.lower()
+    for ph in INJECTION_PHRASES:
+        if ph in pl:
+            return True, ph
+    return False, None
 
 # ── API Key Auth ──────────────────────────────────────────────
 _api_key_header = _APIKeyHeader(name="X-Bendex-API-Key", auto_error=False)
@@ -1248,6 +1274,27 @@ async def proxy(request: Request, path: str,
             media_type="text/event-stream",
             headers={"cache-control": "no-cache", "x-accel-buffering": "no"}
         )
+    # ── Prompt injection check (block mode) ─────────────────
+    if BLOCK_MODE and is_inf and is_json:
+        prompt_text = (body_dict.get("messages") or [{}])[-1].get("content", "")
+        phrase_fired, matched = _phrase_blocked(prompt_text)
+        if phrase_fired:
+            print(f"[BLOCKED] phrase:{matched} | {prompt_text[:60]}")
+            return JSONResponse(status_code=200, content={
+                "id": "blocked",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "[BLOCKED by Arc Sentry — prompt injection detected]"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "model": body_dict.get("model", "unknown"),
+                "arc_sentry": {"blocked": True, "reason": f"phrase:{matched}"}
+            })
+
     fwd = body_bytes
     if is_inf and is_json and body_dict: fwd = json.dumps(_inject_logprobs(body_dict)).encode()
     if is_inf and is_json: hdrs["content-length"] = str(len(fwd))
