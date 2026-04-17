@@ -1,5 +1,5 @@
 """
-Bendex Sentry v16 — Copyright 2026 Hannah Nine / Bendex Geometry LLC
+Arc Gate v1.0 — Copyright 2026 Hannah Nine / Bendex Geometry LLC
 Patent Pending. Bendex Source Available License.
 """
 import asyncio, json, math, os, sqlite3, pickle, time, uuid
@@ -22,7 +22,7 @@ RECAL_DELTA_FLOOR   = float(os.environ.get("SENTRY_DELTA_FLOOR", "1.00"))
 RECAL_BLEND         = 0.10
 RECAL_EVERY         = 10
 TOP_K_EXPLAIN       = 8
-DB_PATH             = os.environ.get("SENTRY_DB", "./sentry_v16.db")
+DB_PATH             = os.environ.get("SENTRY_DB", "./arc_gate.db")
 CHECKPOINT_EVERY    = 1
 N_LOGPROB_POSITIONS = 5
 PORT                = int(os.environ.get("PORT", "8083"))
@@ -1127,12 +1127,12 @@ async def lifespan(app):
     init_db()
     _load_all_from_db()
     get_embed_model()
-    print("Bendex Sentry v16 | Upstream: " + UPSTREAM_URL)
+    print("Arc Gate v1.0 | Upstream: " + UPSTREAM_URL)
     print(f"Dashboard: http://0.0.0.0:{PORT}/dashboard")
     yield
     for did, version in store.list_all(): store.checkpoint(did, version)
 
-app = FastAPI(title="Bendex Sentry", version="16.0", lifespan=lifespan)
+app = FastAPI(title="Arc Gate", version="1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
@@ -1151,7 +1151,7 @@ async def dashboard():
 
 @app.get("/sentry/health")
 async def health():
-    return {"status": "ok", "version": "16.0", "upstream": UPSTREAM_URL,
+    return {"status": "ok", "version": "1.0", "upstream": UPSTREAM_URL,
             "db": DB_PATH, "deployments": len(store.list_all()),
             "alerts": {"webhook": bool(ALERT_WEBHOOK_URL), "email": bool(ALERT_EMAIL_TO)}}
 
