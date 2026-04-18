@@ -584,7 +584,6 @@ async function sendChat(){
         model: 'gpt-3.5-turbo',
         messages: [{role: 'user', content: prompt}],
         max_tokens: 80,
-        x_arc_gate_demo: true
       })
     });
     const data = await res.json();
