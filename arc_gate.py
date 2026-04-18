@@ -385,14 +385,13 @@ def send_email_alert(did, version, result):
     sv = result.get("severity") or {}
     ex = result.get("explanation") or {}
     subject = "[Sentry {}] {} on {}/{}".format(sv.get("tier","?"), result.get("drift_type","DRIFT"), did, version)
-    body = "Deployment: {}
-Version: {}
-Tier: {}
-Type: {}
-Action: {}
-Token shift: {}
-Score: {}
-".format(
+    body = ("Deployment: {}\n"
+        "Version: {}\n"
+        "Tier: {}\n"
+        "Type: {}\n"
+        "Action: {}\n"
+        "Token shift: {}\n"
+        "Score: {}\n").format(
         did, version, sv.get("tier","?"), result.get("drift_type","?"),
         sv.get("action",""), ex.get("summary",""), sv.get("score","?"))
     msg = MIMEText(body)
