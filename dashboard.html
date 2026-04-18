@@ -116,6 +116,27 @@ header{display:flex;align-items:center;justify-content:space-between;padding:16p
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--border2);}
+
+/* ── Chat Panel ─────────────────────────────────────── */
+.chat-panel{background:var(--bg2);border:1px solid var(--border);margin-bottom:16px;}
+.chat-messages{height:280px;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.chat-msg{display:flex;flex-direction:column;gap:3px;}
+.chat-bubble{padding:8px 12px;font-size:12px;line-height:1.5;max-width:85%;font-family:'IBM Plex Mono',monospace;}
+.chat-bubble.user{background:var(--bg3);border:1px solid var(--border2);align-self:flex-end;color:var(--text2);}
+.chat-bubble.blocked{background:rgba(255,51,68,0.08);border:1px solid rgba(255,51,68,0.3);align-self:flex-start;color:var(--danger);}
+.chat-bubble.allowed{background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.15);align-self:flex-start;color:var(--accent);}
+.chat-bubble.system{background:transparent;border:none;align-self:center;color:var(--text3);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;}
+.chat-meta{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--text3);padding:0 4px;}
+.chat-meta.right{text-align:right;}
+.chat-input-row{display:flex;gap:0;border-top:1px solid var(--border);}
+.chat-input{flex:1;background:var(--bg3);border:none;border-right:1px solid var(--border);color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;padding:10px 14px;outline:none;}
+.chat-input::placeholder{color:var(--text3);}
+.chat-send{background:none;border:none;color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:10px 18px;cursor:pointer;letter-spacing:0.08em;text-transform:uppercase;transition:background 0.15s;}
+.chat-send:hover{background:rgba(0,255,136,0.08);}
+.chat-send:disabled{color:var(--text3);cursor:default;}
+.score-row{display:flex;gap:12px;flex-wrap:wrap;padding:6px 12px;background:var(--bg3);border-top:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);}
+.score-item span{color:var(--text);}
+.score-item.fired span{color:var(--danger);}
 </style>
 </head>
 <body>
@@ -498,6 +519,98 @@ async function runCompare(){
 loadHealth();
 loadDeployments();
 setInterval(loadDeployments,10000);
+
+// ── Chat Panel ────────────────────────────────────────
+const CHAT_API = window.location.origin;
+let chatSession = [];
+
+function appendMsg(role, text, meta){
+  const box = document.getElementById('chat-messages');
+  const msg = document.createElement('div');
+  msg.className = 'chat-msg';
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble ' + role;
+  bubble.textContent = text;
+  msg.appendChild(bubble);
+  if(meta){
+    const m = document.createElement('div');
+    m.className = 'chat-meta' + (role==='user'?' right':'');
+    m.textContent = meta;
+    msg.appendChild(m);
+  }
+  box.appendChild(msg);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendChat(){
+  const input = document.getElementById('chat-input');
+  const btn = document.getElementById('chat-send');
+  const prompt = input.value.trim();
+  if(!prompt) return;
+
+  input.value = '';
+  btn.disabled = true;
+  document.getElementById('chat-status').textContent = 'sending...';
+
+  appendMsg('user', prompt, 'you');
+
+  try {
+    const res = await fetch(CHAT_API + '/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer demo'},
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [{role: 'user', content: prompt}],
+        max_tokens: 80,
+        x_arc_gate_demo: true
+      })
+    });
+    const data = await res.json();
+
+    // Check if blocked
+    if(data.arc_sentry && data.arc_sentry.blocked){
+      appendMsg('blocked', '🚫 BLOCKED — ' + (data.arc_sentry.reason || 'injection detected'), 'arc gate');
+      document.getElementById('chat-status').textContent = 'blocked';
+    } else if(data.choices && data.choices[0]){
+      const reply = data.choices[0].message.content;
+      appendMsg('allowed', reply, 'gpt-3.5-turbo via arc gate');
+      document.getElementById('chat-status').textContent = 'allowed';
+    } else if(data.error){
+      appendMsg('blocked', '⚠ ' + data.error.message, 'error');
+      document.getElementById('chat-status').textContent = 'error';
+    }
+
+    // Show scores if available
+    if(data.arc_gate){
+      const sr = document.getElementById('score-row');
+      sr.style.display = 'flex';
+      document.getElementById('sc-dt').textContent = data.arc_gate.dt != null ? data.arc_gate.dt.toFixed(4) : '—';
+      document.getElementById('sc-fr').textContent = data.arc_gate.fr != null ? data.arc_gate.fr.toFixed(4) : '—';
+      document.getElementById('sc-snr').textContent = data.arc_gate.snr != null ? data.arc_gate.snr.toFixed(2) : '—';
+      const fw = document.getElementById('sc-fired-wrap');
+      const fs = document.getElementById('sc-fired');
+      if(data.arc_gate.fired_by && data.arc_gate.fired_by.length){
+        fs.textContent = data.arc_gate.fired_by.join(', ');
+        fw.classList.add('fired');
+      } else {
+        fs.textContent = 'none';
+        fw.classList.remove('fired');
+      }
+    }
+
+  } catch(e){
+    appendMsg('blocked', '⚠ Could not reach Arc Gate: ' + e.message, 'error');
+    document.getElementById('chat-status').textContent = 'error';
+  }
+
+  btn.disabled = false;
+  document.getElementById('chat-input').focus();
+}
+
+document.getElementById('chat-input').addEventListener('keydown', e => {
+  if(e.key === 'Enter') sendChat();
+});
+
 </script>
 </body>
 </html>
