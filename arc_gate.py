@@ -1052,18 +1052,18 @@ async def deployment_metrics(deployment_id: str, model_version: str = "default",
     if s is None: s = load_state(deployment_id, model_version)
     if s is None: return JSONResponse(status_code=404, content={"error": "not found"})
     d = deployment_id; v = model_version
+    status_val = 2 if s.last_status == "DRIFT" else 1 if s.last_status == "elevated" else 0
     lines = [
         "# TYPE bendex_requests_total counter",
-        f"bendex_requests_total{{deployment="{d}",version="{v}"}} {s.request_count}",
+        "bendex_requests_total{deployment=" + d + ",version=" + v + "} " + str(s.request_count),
         "# TYPE bendex_alerts_total counter",
-        f"bendex_alerts_total{{deployment="{d}",version="{v}"}} {s.alert_count}",
+        "bendex_alerts_total{deployment=" + d + ",version=" + v + "} " + str(s.alert_count),
         "# TYPE bendex_cusum_current gauge",
-        f"bendex_cusum_current{{deployment="{d}",version="{v}"}} {round(s.cusum_value,3)}",
+        "bendex_cusum_current{deployment=" + d + ",version=" + v + "} " + str(round(s.cusum_value,3)),
         "# TYPE bendex_status gauge",
-        f"bendex_status{{deployment="{d}",version="{v}"}} {2 if s.last_status == 'DRIFT' else 1 if s.last_status == 'elevated' else 0}",
+        "bendex_status{deployment=" + d + ",version=" + v + "} " + str(status_val),
     ]
-    return Response(content="
-".join(lines), media_type="text/plain; version=0.0.4")
+    return Response(content="\n".join(lines), media_type="text/plain; version=0.0.4")
 
 @app.get("/sentry/deployments/{deployment_id}/evals")
 async def deployment_evals(deployment_id: str, model_version: str = "default", auth=Depends(auth)):
