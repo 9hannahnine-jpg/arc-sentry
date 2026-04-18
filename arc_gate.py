@@ -909,19 +909,14 @@ async def _stream_proxy(request, path, body_dict, fwd, did, version, hdrs, req_s
             async with client.stream(method=request.method, url=UPSTREAM_URL.rstrip("/") + "/" + path,
                                      headers=hdrs, content=fwd, params=dict(request.query_params)) as resp:
                 async for raw_line in resp.aiter_lines():
-                    if not raw_line: yield "
-"; continue
-                    yield raw_line + "
-
-"
+                    if not raw_line: yield "\n"; continue
+                    yield raw_line + "\n\n"
                     if raw_line.startswith("data: ") and raw_line != "data: [DONE]":
                         try:
                             chunk = json.loads(raw_line[6:]); accumulated.append(chunk)
                             if chunk.get("usage"): usage_data = chunk["usage"]
                         except: pass
-    except Exception as e: yield "data: " + json.dumps({"error": str(e)}) + "
-
-"; return
+    except Exception as e: yield "data: " + json.dumps({"error": str(e)}) + "\n\n"; return
     rt = time.time(); lp = _extract_logprobs_streaming(accumulated)
     in_tok = usage_data.get("prompt_tokens", 0); out_tok = usage_data.get("completion_tokens", 0)
     cost = calc_cost(body_dict.get("model", ""), in_tok, out_tok)
