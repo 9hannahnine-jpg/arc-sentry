@@ -60,6 +60,7 @@ Grounded in the second-order Fisher manifold (H2 x H2, R = -4, tau* = 1.2247). F
 
 ## Also available
 
+- Arc Gate — behavioral monitoring proxy for closed model APIs (GPT-4, Claude, Gemini). One URL change. bendexgeometry.com/gate
 - Arc Vigil — training stability monitor. 100% detection, 0% FP, 90% auto-recovery. pip install arc-vigil
 
 ---
