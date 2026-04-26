@@ -233,6 +233,27 @@ class ArcSentryV3:
         fired_by: List[str] = []
         scores: Dict = {}
 
+        # Layer 0: behavioral pre-filter (architecture-agnostic, no model access)
+        from arc_sentry.behavioral_filter import BehavioralFilter
+        if not hasattr(self, '_behavioral_filter'):
+            self._behavioral_filter = BehavioralFilter()
+        bf_result = self._behavioral_filter.screen(prompt)
+        scores["behavioral_score"] = round(bf_result.score, 6)
+        if bf_result.blocked:
+            fired_by.append("behavioral_prefilter")
+            self.alert_history.append({
+                "step": self.request_count,
+                "prompt": prompt[:60],
+                "fired_by": fired_by,
+                "scores": scores,
+                "snr": 0})
+            print(f"[ArcSentry] BLOCKED step={self.request_count} "
+                  f"fired={fired_by} behavioral_score={bf_result.score:.4f} | '{prompt[:50]}'")
+            return "[BLOCKED by Arc Sentry v3]", {
+                "status": "BLOCKED", "step": self.request_count,
+                "fired_by": fired_by, "blocked": True,
+                "scores": scores, "snr": 0}
+
         # Whitelist
         if _whitelist_check(prompt):
             vec = self.adapter.mean_pooled_repr(prompt, self._layer)
