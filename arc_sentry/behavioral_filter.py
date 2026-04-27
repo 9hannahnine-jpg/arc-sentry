@@ -32,7 +32,7 @@ _WHITELIST = [
     'child protection professional','warning signs of abuse',
     'domestic violence counselor','restraining order',
     'staff training workshop','security awareness training',
-    'authorized red team','rules of engagement','phishing simulation',
+    'rules of engagement','phishing simulation',
     'poison control','antidote protocol',
     'customs documentation','inspection procedure','regulated goods',
     'border protection officer','cargo screening',
